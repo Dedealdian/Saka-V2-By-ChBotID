@@ -1,0 +1,2 @@
+# Isi dengan nama-nama yang dilarang, cukup pisahkan dengan SPASI
+DAFTAR_NAMA = "agus ahmad andika andre angga ani anwar asep ayu bambang bayu budi cecep dani dedi deni dewi egi eko fajar fitri indra joko lestari maman maya muhammad nina putra putri rama ramadhan rio rizky rudi sari sinta siti toto udin"
