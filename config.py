@@ -6,9 +6,11 @@ from dotenv import load_dotenv
 # --- LOAD ENVIRONMENT VARIABLES ---
 load_dotenv()
 
-# Token & Database (Diambil dari .env)
+# Token, Database & Assets (Diambil dari .env)
 TOKEN = os.getenv("TOKEN")
 DATABASE_URL = os.getenv("DATABASE_URL")
+# Baris tambahan di bawah ini untuk memperbaiki ImportError
+QRIS_IMAGE_URL = os.getenv("QRIS_IMAGE_URL")
 
 # --- VALIDASI DASAR ---
 if not TOKEN:
@@ -17,6 +19,9 @@ if not TOKEN:
 if not DATABASE_URL:
     print("❌ ERROR: DATABASE_URL tidak ditemukan di file .env!")
     sys.exit(1)
+if not QRIS_IMAGE_URL:
+    # Warning saja jika link qris belum ada di .env agar bot tidak crash
+    print("⚠️ WARNING: QRIS_IMAGE_URL tidak ditemukan di .env!")
 
 # --- USER & GROUP ID CONFIG ---
 OWNER_ID = 8298238837
@@ -33,7 +38,7 @@ GANTI_LIMIT_DEFAULT = 3
 USIR_LIMIT_DEFAULT = 1
 
 # --- ASSETS DATA ---
-# Data QRIS untuk donasi
+# Data QRIS string (untuk generator API)
 QRIS_DATA = (
     "00020101021126610014COM.GO-JEK.WWW01189360091436446025500210G6446025500303UMI514400"
     "14ID.CO.QRIS.WWW0215ID10254092891920303UMI5204899953033605802ID5925Sambung Kata Bot, "

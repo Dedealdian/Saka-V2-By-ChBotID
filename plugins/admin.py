@@ -1,94 +1,129 @@
 import asyncio
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, Chat
-from telegram.constants import ParseMode
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.constants import ParseMode, ChatType
 from telegram.ext import ContextTypes
 from telegram.error import RetryAfter, Forbidden, BadRequest
 
-from config import OWNER_ID, LOG_GROUP_ID
+from config import OWNER_ID
 from database import db_query, get_setting, set_setting
 
-# --- BACKGROUND BROADCAST TASK ---
-
+# --- WORKER BROADCAST (BACKGROUND TASK) ---
 async def run_safe_broadcast(context, admin_id, target_ids, message, is_group=False):
-    """Fungsi internal untuk mengirim pesan secara aman di layar belakang."""
+    """Pengirim pesan massal yang berjalan di background dengan delay aman."""
     success = 0
     fail = 0
     total = len(target_ids)
+    label = "Grup" if is_group else "User"
     
-    # Kirim notifikasi awal ke admin
+    # Notifikasi awal ke admin
     status_msg = await context.bot.send_message(
         chat_id=admin_id,
-        text=f"🚀 <b>Memulai Broadcast...</b>\nTarget: {total} {'Grup' if is_group else 'User'}"
+        text=f"🚀 <b>BROADCAST DIMULAI</b>\nTarget: {total:,} {label}\nStatus: Memproses..."
     )
 
     for i, target in enumerate(target_ids):
-        t_id = target[0] # Ambil ID dari hasil fetchall database
+        t_id = target[0]
         try:
-            # Menggunakan copy_message agar format (caption, button, dll) tetap sama
+            # Jika broadcast grup, pastikan target bukan channel
+            if is_group:
+                try:
+                    chat_info = await context.bot.get_chat(t_id)
+                    if chat_info.type == ChatType.CHANNEL:
+                        fail += 1
+                        continue
+                except: pass
+
+            # Menggunakan copy_message (mendukung teks, foto, video, stiker, dll)
             await context.bot.copy_message(
                 chat_id=t_id,
                 from_chat_id=message.chat_id,
                 message_id=message.message_id
             )
             success += 1
+            
         except RetryAfter as e:
-            # Jika terkena limit Telegram, tunggu sesuai instruksi server
+            # Flood control: Tunggu sesuai instruksi Telegram
             await asyncio.sleep(e.retry_after)
             await context.bot.copy_message(chat_id=t_id, from_chat_id=message.chat_id, message_id=message.message_id)
             success += 1
         except (Forbidden, BadRequest):
-            # User memblokir bot atau grup sudah dihapus
             fail += 1
         except Exception:
             fail += 1
 
-        # Jeda aman (0.05 detik = ~20 pesan per detik) agar tidak dianggap spam
+        # JEDA AMAN (0.05 detik = ~20 pesan per detik)
         await asyncio.sleep(0.05)
 
-        # Update status setiap 50 pesan agar admin tahu progresnya
-        if (i + 1) % 50 == 0:
+        # Update status pesan admin setiap 100 pesan
+        if (i + 1) % 100 == 0:
             try:
                 await status_msg.edit_text(
-                    f"🚀 <b>Broadcast Berjalan...</b>\n"
-                    f"Progres: {i+1}/{total}\n"
-                    f"✅ Sukses: {success}\n"
-                    f"🔴 Gagal: {fail}"
+                    f"🚀 <b>BROADCAST SEDANG BERJALAN</b>\n"
+                    f"Target: {total:,} {label}\n"
+                    f"━━━━━━━━━━━━━━━━━━━━\n"
+                    f"✅ Sukses: {success:,}\n"
+                    f"🔴 Gagal: {fail:,}\n"
+                    f"⌛ Progres: {i+1:,}/{total:,}",
+                    parse_mode=ParseMode.HTML
                 )
             except: pass
 
-    # Laporan Akhir
+    # Laporan Akhir setelah selesai
     await context.bot.send_message(
         chat_id=admin_id,
-        text=(f"✅ <b>Broadcast Selesai!</b>\n\n"
-              f"Tipe: {'Grup' if is_group else 'User'}\n"
-              f"🟢 Sukses: {success}\n"
-              f"🔴 Gagal: {fail}\n"
-              f"📊 Total: {total}"),
+        text=(f"✅ <b>BROADCAST SELESAI</b>\n\n"
+              f"📊 <b>Hasil Akhir {label}:</b>\n"
+              f"🟢 Sukses: {success:,}\n"
+              f"🔴 Gagal: {fail:,}\n"
+              f"🏁 Total Target: {total:,}"),
         parse_mode=ParseMode.HTML
     )
 
 # --- COMMAND HANDLERS ---
 
+async def settings_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Panel pengaturan Force Subscribe (Fsub)."""
+    u = update.effective_user
+    if u.id != OWNER_ID: return
+    
+    status = get_setting('fsub_status')
+    btn_toggle = "🟢 AKTIF" if status == "on" else "🔴 MATI"
+    
+    kb = [
+        [InlineKeyboardButton(f"Fsub Status: {btn_toggle}", callback_data="set_toggle")],
+        [InlineKeyboardButton("🆔 Set ID", callback_data="set_id"), InlineKeyboardButton("🔗 Set Link", callback_data="set_link")],
+        [InlineKeyboardButton("📝 Set Pesan", callback_data="set_msg"), InlineKeyboardButton("🏷️ Set Tombol", callback_data="set_btn")],
+        [InlineKeyboardButton("❌ Tutup", callback_data="set_close")]
+    ]
+    
+    text = "⚙️ <b>FSUB SETTINGS PANEL</b>\n\nSilakan pilih menu di bawah untuk mengkonfigurasi kewajiban join channel bagi seluruh pemain."
+    
+    # Deteksi apakah dipanggil via ketikan (/settings) atau via tombol (callback)
+    if update.callback_query:
+        await update.callback_query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(kb), parse_mode=ParseMode.HTML)
+    else:
+        await update.effective_message.reply_text(text, reply_markup=InlineKeyboardMarkup(kb), parse_mode=ParseMode.HTML)
+
 async def broadcast_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handler perintah /bcuser dan /bcgroup."""
+    """Handler perintah /bcuser dan /bcgroup (PM2 24/7 Ready)."""
     u = update.effective_user
     if u.id != OWNER_ID: return
 
-    # Cek apakah admin me-reply pesan yang ingin di-broadcast
+    # Pastikan admin membalas ke pesan yang ingin disebar
     if not update.effective_message.reply_to_message:
-        return await update.message.reply_text("❌ Balas (reply) ke sebuah pesan untuk melakukan broadcast!")
+        return await update.effective_message.reply_text("❌ <b>Gagal:</b> Balas (reply) ke pesan yang ingin di-broadcast!")
 
     cmd = update.effective_message.text
     is_group = "bcgroup" in cmd
     
-    # Ambil target dari database
+    # Ambil data dari tabel yang sesuai
     table = "groups" if is_group else "users"
     targets = db_query(f"SELECT id FROM {table}", fetchall=True)
 
     if not targets:
-        return await update.message.reply_text("❌ Tidak ada target di database.")
+        return await update.effective_message.reply_text("❌ Database kosong, tidak ada target ditemukan.")
 
-    # Jalankan broadcast di layar belakang (Background Task)
+    # Jalankan proses pengiriman di layar belakang menggunakan asyncio.create_task
     asyncio.create_task(
         run_safe_broadcast(
             context, 
@@ -99,49 +134,30 @@ async def broadcast_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
     )
     
-    await update.message.reply_text(f"⏳ Sedang memproses broadcast ke {len(targets)} target...")
+    target_name = "Grup" if is_group else "User"
+    await update.effective_message.reply_text(f"⏳ Mengirim broadcast ke {len(targets):,} {target_name} di layar belakang...")
 
 async def stats_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Cek statistik jumlah user dan grup."""
+    """Cek statistik database."""
     if update.effective_user.id != OWNER_ID: return
     
     u_count = db_query("SELECT COUNT(*) FROM users", fetchone=True)[0]
     g_count = db_query("SELECT COUNT(*) FROM groups", fetchone=True)[0]
     
-    txt = (f"📊 <b>STATISTIK BOT</b>\n\n"
-           f"👤 <b>Total User:</b> {u_count}\n"
-           f"🏢 <b>Total Grup:</b> {g_count}")
-    await update.message.reply_text(txt, parse_mode=ParseMode.HTML)
-
-async def settings_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Panel pengaturan Force Subscribe (Fsub)."""
-    if update.effective_user.id != OWNER_ID: return
-    
-    status = get_setting('fsub_status')
-    btn_toggle = "🟢 AKTIF" if status == "on" else "🔴 MATI"
-    
-    kb = [
-        [InlineKeyboardButton(f"Fsub Status: {btn_toggle}", callback_data="set_toggle")],
-        [InlineKeyboardButton("🆔 Set Channel ID", callback_data="set_id"), InlineKeyboardButton("🔗 Set Link", callback_data="set_link")],
-        [InlineKeyboardButton("📝 Set Pesan", callback_data="set_msg"), InlineKeyboardButton("🏷️ Set Tombol", callback_data="set_btn")],
-        [InlineKeyboardButton("❌ Tutup", callback_data="set_close")]
-    ]
-    
-    await update.message.reply_text(
-        "⚙️ <b>FSUB SETTINGS PANEL</b>\n\nSilakan pilih menu di bawah untuk mengatur kewajiban join channel.",
-        reply_markup=InlineKeyboardMarkup(kb),
-        parse_mode=ParseMode.HTML
-    )
+    txt = (f"📊 <b>STATISTIK BOT SAKA</b>\n\n"
+           f"👤 <b>Total User:</b> {u_count:,}\n"
+           f"🏢 <b>Total Grup:</b> {g_count:,}")
+    await update.effective_message.reply_text(txt, parse_mode=ParseMode.HTML)
 
 async def reset_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Reset poin global (Hati-hati!)."""
+    """Perintah untuk reset poin global (Hati-hati)."""
     if update.effective_user.id != OWNER_ID: return
     
     kb = [[InlineKeyboardButton("✅ YA, RESET SEMUA", callback_data="reset_acc"), 
            InlineKeyboardButton("❌ BATAL", callback_data="set_close")]]
     
-    await update.message.reply_text(
-        "⚠️ <b>PERINGATAN!</b>\n\nApakah Anda yakin ingin me-reset SEMUA poin pemain menjadi 0?",
+    await update.effective_message.reply_text(
+        "⚠️ <b>KONFIRMASI RESET POIN</b>\n\nApakah Anda yakin ingin me-reset poin seluruh pemain menjadi 0?\nTindakan ini tidak dapat dibatalkan.",
         reply_markup=InlineKeyboardMarkup(kb),
         parse_mode=ParseMode.HTML
     )

@@ -1,84 +1,105 @@
 import httpx
-import platform
-import sys
-from telegram import Update
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from config import TOKEN, OWNER_ID
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Menampilkan panduan lengkap dengan narasi mendalam dan fitur Collapsible."""
+    """Menampilkan panduan lengkap dengan fitur Tabel Rich HTML 10.1."""
     
-    # 1. Ambil data sistem
-    os_info = f"{platform.system()} {platform.machine()}".replace("<", "&lt;").replace(">", "&gt;")
-    py_ver = sys.version.split()[0]
-
-    # 2. Susun Rich HTML (Tanpa Indentasi awal baris agar aman 100%)
+    # Konstruksi Rich HTML
     rich_html = (
-        "<b>👋 SELAMAT DATANG DI ARENA SAMBUNG KATA SAKA!</b><br>"
-        "Pusat peradaban kata dan adu ketangkasan otak terbesar di Telegram. Klik judul di bawah untuk mengeksplorasi seluruh fitur kami:<br><br>"
+        "<b>🆘 Help Sambung Kata.</b><br><br>"
         
+        "💫 <b>Sambung - Kata | WNI</b> Adalah Bot Kata Bersambung Bergiliran Juga Berantai. "
+        "Dapat dimainkan di dalam bot ataupun dimainkan di dalam grup dalam mode kompetisi, "
+        "dan mengatur strategi untuk mematikan lawan menjawab.<br><br>"
+        
+        "🚀 <b>Misi Sambung - Kata | WNI</b><br>"
+        "Adalah menyambungkan kata yang sesuai dengan kata terakhir lawan. Secara Bergiliran. "
+        "Memiliki waktu 45 Detik untuk menyambungkan kata 1 dengan kata lain nya.<br><br>"
+
         "<details>"
-        "<summary>🌟 SAMBUTAN HANGAT</summary>"
-        "Halo Agen Bahasa! Kami sangat senang Anda berada di sini. Bot Sambung Kata (SAKA) bukan sekadar bot permainan biasa; ini adalah wadah di mana ribuan orang berkumpul untuk menguji sejauh mana penguasaan kosa kata mereka. Di sini, setiap kata yang Anda ketik adalah senjata, dan setiap jawaban benar adalah langkah menuju gelar Legenda!"
-        "</details>"
+        "<summary>Tampilkan lebih</summary>"
+        "<b>🎮 Game Play</b><br>"
+        "Memulai game di dalam grup / bot sangatlah mudah anda hanya mengetikan perintah yang sudah di sediakan oleh pembuat game &#64;ID_Anda. "
+        "untuk memicu permainan di dalam grup.<br><br>"
+
+        "<b>⚠️Perintah⚠️</b><br>"
+        "<b>/mulai</b> - Memuat List Pemain & ID Room.<br>"
+        "Ketika pendaftaran dibuka, user lain gunakan tombol 🚪Gabung. Jika ingin batal, gunakan tombol 🏃‍♂️Keluar. "
+        "Syarat mulai adalah minimal 2 Pemain, lalu Leader tekan tombol ▶️Play.<br><br>"
+
+        "<b>/gabung</b> - Bergabung ke game berjalan.<br>"
+        "Gunakan <code>/gabung</code> di grup atau <code>/gabung [ID]</code> untuk lintas chat.<br><br>"
+
+        "<b>/keluar</b> - Keluar dari sesi game.<br>"
+        "Gunakan <code>/keluar</code> atau <code>/keluar [ID]</code> untuk berhenti bermain.<br><br>"
+
+        "<b>/id</b> - Cek ID aktif.<br>"
+        "Melihat seluruh daftar ID Room yang sedang menunggu atau bermain.<br><br>"
+
+        "<b>/stop</b> - Menghentikan total permainan (Hanya Leader/Admin).<br><br>"
+
+        "<b>/ganti</b> - Ganti huruf akhiran (Limit 3× per pemain).<br><br>"
+
+        "<b>/usir</b> - Mengeluarkan pemain yang AFK/Pasif.<br><br>"
+
+        "<b>/top</b> - Melihat 20 Pemain Terbaik Dunia.<br><br>"
+
+        "<b>/spin</b> - Tukar poin jadi saldo nyata (Hanya di Private Chat).<br><br>"
+
+        "<b>⭕Donasi</b><br>"
+        "Dukung kami agar bot tetap lancar 24/7 melalui link Qris di bawah ini:<br>"
+        "https://t.me/ChBotID/231<br><br>"
+
+        "<b>📊 PENJELASAN LEVEL</b><br>"
+        "<table>"
+        "<thead><tr><th>Level</th><th>Min Huruf</th></tr></thead>"
+        "<tbody>"
+        "<tr><td>🟢 Easy</td><td>3 Huruf</td></tr>"
+        "<tr><td>🟡 Medium</td><td>4 Huruf</td></tr>"
+        "<tr><td>🔴 Hard</td><td>5 Huruf</td></tr>"
+        "<tr><td>🥉 Harapan 3</td><td>6 Huruf</td></tr>"
+        "<tr><td>🥈 Harapan 2</td><td>7 Huruf</td></tr>"
+        "<tr><td>🥇 Jawara</td><td>8 Huruf</td></tr>"
+        "<tr><td>🏆 Legend</td><td>9 Huruf</td></tr>"
+        "<tr><td>🏅 WNI</td><td>10 Huruf</td></tr>"
+        "</tbody></table><br>"
+
+        "<b>🚫 LARANGAN GAME</b><br>"
+        "<table>"
+        "<thead><tr><th>Larangan</th><th>Sanksi</th></tr></thead>"
+        "<tbody>"
+        "<tr><td>Nama Orang</td><td>Nyawa -1</td></tr>"
+        "<tr><td>Kata Terulang</td><td>Nyawa -1</td></tr>"
+        "<tr><td>Kata Non-Baku</td><td>Nyawa -1</td></tr>"
+        "<tr><td>Non-KBBI</td><td>Nyawa -1</td></tr>"
+        "</tbody></table><br>"
+
+        "<b>⏱️ WAKTU JAWAB</b><br>"
+        "<table>"
+        "<thead><tr><th>Kategori</th><th>Durasi</th></tr></thead>"
+        "<tbody>"
+        "<tr><td>Batas Menjawab</td><td>45 Detik</td></tr>"
+        "<tr><td>Status AFK</td><td>3× Lewat</td></tr>"
+        "</tbody></table><br>"
+
+        "Saya Di Rancang & Di Dukung Oleh:<br><br>"
+        "<b>👨‍💻Perancang Bot</b><br>"
+        "- &#64;ID_Anda<br>"
+        "- &#64;ID_Saya<br><br>"
+
+        "<b>💻Support</b><br>"
+        "- &#64;gaemaryllis<br>"
+        "- &#64;T1DAK<br>"
+        "- &#64;queenalaa23<br>"
+        "- &#64;Akusukakue<br>"
+        "- &#64;anaakitik | &#64;SilenceSpe4ks<br><br>"
         
-        "<details>"
-        "<summary>🛠️ KEGUNAAN BOT INI</summary>"
-        "Bot SAKA dirancang sebagai asisten interaktif di dalam Grup maupun Private Chat. Kegunaan utamanya adalah sebagai media hiburan yang edukatif, pengisi kekosongan waktu yang produktif, serta alat untuk menghidupkan suasana grup agar lebih aktif dan kompetitif. Bot ini juga terintegrasi dengan database KBBI yang sangat luas, menjadikannya referensi kata baku yang handal."
+        "📢<b>Channel:</b> &#64;ChBotID"
         "</details>"
-        
-        "<details>"
-        "<summary>🧠 MANFAAT BERMAIN GAME INI</summary>"
-        "Bermain sambung kata secara rutin memiliki manfaat luar biasa, di antaranya:<br>"
-        "• <b>Memperluas Kosa Kata:</b> Anda akan menemukan ribuan diksi baru yang jarang didengar.<br>"
-        "• <b>Melatih Kecepatan Berpikir:</b> Batas waktu 45 detik memaksa otak bekerja lebih cepat dan fokus.<br>"
-        "• <b>Mencegah Pikun:</b> Aktivitas mengingat dan mencari kata sangat baik untuk kesehatan saraf kognitif.<br>"
-        "• <b>Cinta Bahasa Indonesia:</b> Mengenal lebih dalam kekayaan bahasa ibu kita melalui Kamus Baku."
-        "</details>"
-        
-        "<details>"
-        "<summary>🔥 KESERUAN TANPA BATAS</summary>"
-        "Kenapa Anda harus bermain terus? Karena di SAKA, adrenalin Anda akan dipacu! Bayangkan ketegangan saat nyawa tinggal satu, waktu hampir habis, dan Anda harus menemukan kata yang berawalan sulit. Belum lagi persaingan sengit memperebutkan posisi <b>TOP 20 GLOBAL</b> untuk memamerkan gengsi Anda sebagai penguasa bahasa di hadapan pemain seluruh dunia. Setiap level memiliki tantangan yang semakin berat, membuat Anda tidak akan pernah merasa bosan!"
-        "</details>"
-        
-        "<details>"
-        "<summary>💡 CARA BERMAIN</summary>"
-        "Mulai petualangan Anda dengan langkah mudah:<br>"
-        "1. Ketik <b>/mulai</b> untuk membuka pendaftaran di grup atau bermain sendiri.<br>"
-        "2. Jika di grup, ajak teman Anda mengetik <b>/gabung</b>.<br>"
-        "3. Leader (pembuat room) klik tombol <b>Play</b> untuk memulai perang kata.<br>"
-        "4. Bot memberikan akhiran huruf (misal: 'AT'), Anda wajib <b>REPLY</b> pesan bot dengan kata berawalan huruf tersebut (misal: 'ATAP')."
-        "</details>"
-        
-        "<details>"
-        "<summary>📖 PERATURAN PERMAINAN</summary>"
-        "Demi menjaga sportivitas, patuhi aturan berikut:<br>"
-        "• ⏱️ <b>Waktu:</b> Anda hanya punya 45 detik untuk menjawab.<br>"
-        "• 📊 <b>Minimal Huruf:</b> Level Easy (3 huruf) hingga level WNI (10 huruf). Semakin tinggi level, semakin panjang kata yang diminta.<br>"
-        "• 🚫 <b>Larangan:</b> Dilarang keras menggunakan Nama Orang/Manusia dan kata yang sudah pernah digunakan dalam sesi tersebut.<br>"
-        "• 💀 <b>Eliminasi:</b> Salah menjawab 3x atau AFK (tidak jawab) 3x akan membuat Anda gugur otomatis."
-        "</details>"
-        
-        "<details>"
-        "<summary>🖥️ INFORMASI SISTEM</summary>"
-        f"🖥️ <b>Spesifikasi Bot:</b><br>"
-        f"• <b>OS:</b> {os_info}<br>"
-        f"• <b>Python:</b> {py_ver}<br>"
-        "• <b>Engine:</b> Modular SAKA Architecture v2.5<br>"
-        "• <b>Database:</b> PostgreSQL (Ultra Fast)<br>"
-        "• <b>Developer:</b> Dede Aldian"
-        "</details>"
-        
-        "<details>"
-        "<summary>🎁 DONASI</summary>"
-        "Bot ini berjalan 24/7 tanpa henti berkat dukungan para Agen sekalian. Donasi Anda sangat membantu pembiayaan server VPS agar permainan tetap lancar tanpa lag. Anda bisa berdonasi melalui QRIS manual yang terdapat di menu <b>/top</b>.<br><br>"
-        "<b>Gopay:</b> <code>089678824963</code> a/n TJ"
-        "</details>"
-        
-        "<br><i>Teruslah berlatih, raih poin sebanyak mungkin, dan jadilah pilar kosa kata bangsa!</i>"
     )
 
-    # 3. Payload
     payload = {
         "chat_id": update.effective_chat.id,
         "rich_message": {"html": rich_html},
@@ -87,17 +108,16 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         }
     }
 
-    # 4. Kirim via HTTPX
     async with httpx.AsyncClient() as client:
         url = f"https://api.telegram.org/bot{TOKEN}/sendRichMessage"
         try:
-            response = await client.post(url, json=payload, timeout=20.0)
+            response = await client.post(url, json=payload, timeout=25.0)
             if response.status_code != 200:
-                raise Exception(f"Error: {response.text}")
+                print(f"DEBUG HELP ERROR: {response.text}")
+                raise Exception("API_REJECTED")
         except Exception:
-            # Fallback jika terjadi error
+            # Fallback jika Rich Message gagal
             await update.message.reply_text(
-                "❓ <b>PANDUAN BOT SAKA</b>\n\nGagal memuat menu interaktif terbaru. Silakan hubungi admin.",
-                reply_markup={"inline_keyboard": [[{"text": "👨‍💻 Bantuan", "url": f"tg://user?id={OWNER_ID}"}]]},
+                "🆘 <b>Help Sambung Kata</b>\n\nMaaf, terjadi kendala saat memuat panduan. Hubungi admin.",
                 parse_mode="HTML"
             )
