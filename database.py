@@ -2,14 +2,16 @@ import sqlite3
 import psycopg2
 from psycopg2 import extras, pool
 import os
+import logging
 from config import DATABASE_URL
 
 # --- CONNECTION POOLING SETUP ---
 try:
+    # Menggunakan SimpleConnectionPool untuk efisiensi RAM VPS
     db_pool = psycopg2.pool.SimpleConnectionPool(1, 20, DATABASE_URL)
-    print("✅ Database connection pool berhasil dibuat.")
+    logging.info("🗄️ Database Connection: Pool berhasil dibuat.")
 except Exception as e:
-    print(f"⚠️ Gagal membuat database pool: {e}")
+    logging.error(f"⚠️ Database Connection: Gagal membuat pool - {e}")
     db_pool = None
 
 # --- CACHE SETTINGS ---
@@ -18,18 +20,18 @@ SETTINGS_CACHE = {}
 def db_query(query, params=(), fetchone=False, fetchall=False, commit=False):
     """Fungsi universal untuk menjalankan query PostgreSQL."""
     conn = None
-    if db_pool:
-        conn = db_pool.getconn()
-    else:
-        conn = psycopg2.connect(DATABASE_URL)
-        
-    c = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
     try:
+        if db_pool:
+            conn = db_pool.getconn()
+        else:
+            conn = psycopg2.connect(DATABASE_URL)
+            
+        c = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+        
         # Konversi placeholder SQLite (?) ke PostgreSQL (%s)
         query = query.replace('?', '%s')
         
-        # Logika penggantian INSERT OR IGNORE / REPLACE untuk PostgreSQL modern
-        # Jika PostgreSQL versi lama, bagian ini mungkin perlu disesuaikan manual
+        # Logika penggantian INSERT OR IGNORE / REPLACE untuk PostgreSQL
         if "INSERT OR IGNORE" in query:
             query = query.replace("INSERT OR IGNORE INTO", "INSERT INTO")
             if "users" in query: query += " ON CONFLICT (id) DO NOTHING"
@@ -48,46 +50,47 @@ def db_query(query, params=(), fetchone=False, fetchall=False, commit=False):
         if commit: conn.commit()
         return res
     except Exception as e:
-        # Jika error karena ON CONFLICT (Postgres Tua), kita abaikan saja khusus untuk INSERT
+        if conn: conn.rollback()
+        # Penanganan khusus untuk versi Postgres yang mungkin tidak support ON CONFLICT
         if "syntax error at or near \"ON\"" in str(e) or "ON CONFLICT" in str(e):
-            conn.rollback()
-            # Coba jalankan tanpa ON CONFLICT (Akan error jika duplicate, tapi aman untuk init)
             try:
+                c = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
                 raw_query = query.split(" ON CONFLICT")[0]
                 c.execute(raw_query, params)
                 if commit: conn.commit()
             except:
-                conn.rollback()
+                if conn: conn.rollback()
         else:
-            print(f"❌ Database Error: {e}")
+            logging.error(f"❌ Database Query Error: {e}")
             raise e
     finally:
-        c.close()
-        if db_pool:
-            db_pool.putconn(conn)
-        else:
-            conn.close()
+        if conn:
+            if db_pool:
+                db_pool.putconn(conn)
+            else:
+                conn.close()
 
 def migrate_from_all_sqlite():
     """Migrasi data dari database lama (SQLite) ke PostgreSQL."""
     for db_file in ['database.db', 'bungkata.db']:
         if os.path.exists(db_file):
-            print(f">>> MEMPROSES MIGRASI: {db_file}")
+            logging.info(f"🔄 Database Migration: Memproses {db_file}...")
             conn_sq = sqlite3.connect(db_file)
             c_sq = conn_sq.cursor()
             try:
                 c_sq.execute("SELECT id, username, points, max_tc, balance, spin_count FROM users")
-                for u in c_sq.fetchall():
+                rows = c_sq.fetchall()
+                for u in rows:
                     db_query("INSERT OR IGNORE INTO users (id, username, points, max_tc, balance, spin_count) VALUES (?, ?, ?, ?, ?, ?)",
                              (u[0], u[1], u[2], u[3], u[4], u[5]), commit=True)
-                print(f"✅ SELESAI MIGRASI {db_file}")
+                logging.info(f"✅ Database Migration: {db_file} selesai dipindahkan.")
             except Exception as e:
-                print(f"❌ ERROR MIGRASI {db_file}: {e}")
+                logging.error(f"❌ Database Migration: Gagal pada {db_file} - {e}")
             finally:
                 conn_sq.close()
 
 def init_db():
-    """Inisialisasi tabel-tabel."""
+    """Inisialisasi tabel-tabel utama."""
     db_query('''CREATE TABLE IF NOT EXISTS users (
         id BIGINT PRIMARY KEY,
         username TEXT,
@@ -108,9 +111,10 @@ def init_db():
     
     db_query('''CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)''', commit=True)
 
+    # Jalankan migrasi jika ada file SQLite
     migrate_from_all_sqlite()
 
-    # Pakai INSERT OR IGNORE agar ditangani oleh logika db_query
+    # Masukkan pengaturan default (fsub, dll)
     defaults = [
         ('fsub_id', '-1002856616933'),
         ('fsub_link', 'https://t.me/addlist/Ld2g4xk8AAwyOTg1'),
@@ -120,8 +124,11 @@ def init_db():
     ]
     for k, v in defaults:
         db_query("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", (k, v), commit=True)
+    
+    logging.info("✅ Database System: Tabel & Default Settings siap.")
 
 def get_setting(key):
+    """Mengambil setting dengan sistem cache untuk menghemat RAM VPS."""
     if key in SETTINGS_CACHE: return SETTINGS_CACHE[key]
     res = db_query("SELECT value FROM settings WHERE key=%s", (key,), fetchone=True)
     val = res[0] if res else ""
@@ -129,5 +136,6 @@ def get_setting(key):
     return val
 
 def set_setting(key, value):
+    """Mengupdate setting."""
     db_query("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", (key, str(value)), commit=True)
     SETTINGS_CACHE[key] = str(value)

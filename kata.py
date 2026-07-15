@@ -1,5 +1,6 @@
 import sys
 import logging
+import asyncio
 from datetime import time
 from telegram import Update
 from telegram.ext import (
@@ -11,7 +12,7 @@ from telegram.ext import (
     ChatMemberHandler,
     ContextTypes
 )
-from telegram.constants import ParseMode
+from telegram.constants import ParseMode, ChatType
 
 # --- IMPORT PONDASI ---
 from config import TOKEN, LOG_GROUP_ID, setup_logging
@@ -32,100 +33,112 @@ from plugins.admin import broadcast_cmd, stats_cmd, settings_cmd, reset_cmd
 from plugins.help import help_command
 from plugins.callback import cb_logic
 
-# --- 1. LOGGING SYSTEM (PENGGUNA & GRUP BARU) ---
+# --- 1. SYSTEM LOG HANDLER (PENGALIH KE TELEGRAM) ---
+
+class TelegramLogHandler(logging.Handler):
+    """Memindahkan log dari VPS ke Telegram agar VPS dingin dan hemat resource."""
+    def __init__(self, application: Application, chat_id: int):
+        super().__init__()
+        self.application = application
+        self.chat_id = chat_id
+
+    def emit(self, record):
+        # Abaikan log internal library agar tidak loop/spam
+        if record.name.startswith(('telegram', 'httpx', 'apscheduler')):
+            return
+        
+        if not self.application.bot: return
+        log_entry = self.format(record)
+        
+        try:
+            # Kirim log secara asinkron (Mendukung HTML dari logging.info)
+            loop = asyncio.get_running_loop()
+            loop.create_task(self.send_log(log_entry))
+        except RuntimeError:
+            pass
+
+    async def send_log(self, message):
+        try:
+            # Kirim pesan log apa adanya (formatting diatur di pengirimnya)
+            await self.application.bot.send_message(
+                self.chat_id, 
+                message, 
+                parse_mode=ParseMode.HTML
+            )
+        except:
+            pass
+
+# --- 2. TRACKING FUNCTIONS ---
 
 async def track_chats(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Mencatat dan melaporkan ketika bot masuk ke grup baru."""
     res = update.my_chat_member
-    if not res: return
-    
+    if not res or not res.new_chat_member: return
     if res.new_chat_member.status in ["member", "administrator"]:
         chat = res.chat
-        # Simpan ke Database
-        db_query(
-            "INSERT INTO groups (id, title) VALUES (?, ?) ON CONFLICT (id) DO UPDATE SET title = EXCLUDED.title", 
-            (chat.id, chat.title), 
-            commit=True
-        )
+        db_query("INSERT INTO groups (id, title) VALUES (?, ?) ON CONFLICT (id) DO UPDATE SET title = EXCLUDED.title", (chat.id, chat.title), commit=True)
         await update_group_link(chat, context)
-        
-        # Kirim Log ke Grup Log
-        log_msg = (f"📥 <b>BOT MASUK GRUP BARU</b>\n"
-                   f"━━━━━━━━━━━━━━━━━━━━\n"
-                   f"<b>Nama:</b> {chat.title}\n"
-                   f"<b>ID:</b> <code>{chat.id}</code>\n"
-                   f"<b>Username:</b> @{chat.username if chat.username else '-'}\n"
-                   f"<b>Tipe:</b> {chat.type.upper()}")
-        try:
-            await context.bot.send_message(LOG_GROUP_ID, log_msg, parse_mode=ParseMode.HTML)
-            
-            # Pesan Sambutan di Grup tersebut
-            welcome = (f"👋 <b>Halo Anggota {chat.title}!</b>\n\n"
-                       f"Saya adalah Bot Sambung Kata yang akan menemani waktu luang kalian.\n\n"
-                       f"• Gunakan /mulai untuk bermain\n"
-                       f"• Gunakan /help untuk bantuan\n\n"
-                       f"<i>Mohon jadikan saya Admin agar fitur Ranking Grup aktif.</i>")
-            await context.bot.send_message(chat.id, welcome, parse_mode=ParseMode.HTML)
-        except: pass
+        # Log masuk grup (Bold sebelum titik dua)
+        logging.info(f"<b>📥 Bot Masuk Grup</b>: {chat.title} (<code>{chat.id}</code>)")
 
 async def track_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Mencatat pengguna baru yang pertama kali menekan /start."""
     user = update.effective_user
+    chat = update.effective_chat
     if not user: return
     
-    # Cek apakah user sudah ada di database
     check = db_query("SELECT id FROM users WHERE id = ?", (user.id,), fetchone=True)
     if not check:
-        # Simpan user baru
-        username = user.username if user.username else "User"
-        db_query("INSERT INTO users (id, username) VALUES (?, ?)", (user.id, username), commit=True)
-        
-        # Kirim Log ke Grup Log
-        log_msg = (f"👤 <b>PENGGUNA BARU TERDETEKSI</b>\n"
-                   f"━━━━━━━━━━━━━━━━━━━━\n"
-                   f"<b>Nama:</b> {user.first_name}\n"
-                   f"<b>ID:</b> <code>{user.id}</code>\n"
-                   f"<b>Username:</b> @{user.username if user.username else '-'}")
-        try:
-            await context.bot.send_message(LOG_GROUP_ID, log_msg, parse_mode=ParseMode.HTML)
-        except: pass
+        db_query("INSERT INTO users (id, username) VALUES (?, ?)", (user.id, user.username or "User"), commit=True)
+        # Log user baru (Bold sebelum titik dua)
+        logging.info(f"<b>👤 User Baru</b>: {user.first_name} (<code>{user.id}</code>)")
     
-    # Jalankan perintah start yang asli
-    from config import START_TEXT
-    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-    kb = [[InlineKeyboardButton("➕ MASUKKAN KE GRUP", url=f"https://t.me/{context.bot.username}?startgroup=start")]]
-    await update.message.reply_text(START_TEXT, reply_markup=InlineKeyboardMarkup(kb), parse_mode=ParseMode.HTML, disable_web_page_preview=True)
+    if chat.type == ChatType.PRIVATE:
+        from config import START_TEXT
+        from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+        kb = [[InlineKeyboardButton("➕ MASUKKAN KE GRUP", url=f"https://t.me/{context.bot.username}?startgroup=start")]]
+        try: await update.message.reply_text(START_TEXT, reply_markup=InlineKeyboardMarkup(kb), parse_mode=ParseMode.HTML)
+        except: pass
 
-# --- 2. SCHEDULER TASKS ---
-
-async def daily_clear_cache(context: ContextTypes.DEFAULT_TYPE):
-    """Membersihkan memory setiap malam agar bot tetap ringan."""
+async def daily_maintenance(context: ContextTypes.DEFAULT_TYPE):
+    """Pembersihan rutin setiap malam."""
     rooms.clear()
-    load_dictionary()
-    log_text = "🧹 <b>Auto Clear Cache:</b> Berhasil dilakukan (Memory dikosongkan & Kamus dimuat ulang)."
-    try: await context.bot.send_message(LOG_GROUP_ID, log_text, parse_mode=ParseMode.HTML)
-    except: pass
+    total = load_dictionary()
+    logging.info(f"<b>🧹 Maintenance</b>: Kamus dimuat ulang ({total} kata).")
 
 # --- 3. MAIN RUNNER ---
 
 def main():
-    # Inisialisasi Logging ke Terminal
-    setup_logging()
-    
-    # Inisialisasi Database (Create tables & Migration)
-    print(">>> Menginisialisasi Database...")
-    init_db()
+    # --- PENGATURAN LOGGING (SENYAPKAN TERMINAL VPS) ---
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.INFO)
 
-    # Membangun Aplikasi Telegram
+    # Hapus output terminal bawaan agar tidak spam di VPS
+    for handler in root_logger.handlers[:]:
+        root_logger.removeHandler(handler)
+
+    # Tambahkan pencatat terminal HANYA untuk ERROR agar VPS tetap senyap
+    vps_handler = logging.StreamHandler(sys.stdout)
+    vps_handler.setLevel(logging.ERROR)
+    root_logger.addHandler(vps_handler)
+
+    # Membangun Aplikasi
     app = Application.builder().token(TOKEN).build()
 
-    # --- PENDAFTARAN HANDLER ---
+    # PASANG PIPA LOG KE TELEGRAM UNTUK INFO+
+    tg_handler = TelegramLogHandler(app, LOG_GROUP_ID)
+    tg_handler.setLevel(logging.INFO)
+    root_logger.addHandler(tg_handler)
 
-    # Perintah Dasar & Tracking
+    # Senyapkan library internal agar tidak mengganggu logs
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("telegram").setLevel(logging.WARNING)
+
+    # Inisialisasi Database & Dictionary
+    init_db()
+    load_dictionary()
+
+    # --- PENDAFTARAN HANDLER (100% UTUH) ---
     app.add_handler(CommandHandler("start", track_users))
     app.add_handler(CommandHandler("help", help_command))
-
-    # Perintah Game (Modular)
     app.add_handler(CommandHandler("mulai", mulai_cmd))
     app.add_handler(CommandHandler("gabung", gabung_cmd))
     app.add_handler(CommandHandler("keluar", keluar_cmd))
@@ -133,8 +146,6 @@ def main():
     app.add_handler(CommandHandler("stop", stop_cmd))
     app.add_handler(CommandHandler("usir", usir_cmd))
     app.add_handler(CommandHandler("ganti", ganti_cmd))
-
-    # Perintah Ekonomi & Admin
     app.add_handler(CommandHandler("top", top_cmd))
     app.add_handler(CommandHandler("spin", spin_cmd))
     app.add_handler(CommandHandler("e", edit_point_cmd))
@@ -142,29 +153,20 @@ def main():
     app.add_handler(CommandHandler("settings", settings_cmd))
     app.add_handler(CommandHandler("reset", reset_cmd))
     app.add_handler(CommandHandler(["bcuser", "bcgroup"], broadcast_cmd))
-
-    # Handler Callback (Tombol)
-    app.add_handler(CallbackQueryHandler(cb_logic))
-
-    # Handler Pesan (Jawaban Game & Filter Teks)
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_all))
     
-    # Handler Deteksi Grup Baru
+    app.add_handler(CallbackQueryHandler(cb_logic))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_all))
     app.add_handler(ChatMemberHandler(track_chats, ChatMemberHandler.MY_CHAT_MEMBER))
 
     # Error Handler Global
     app.add_error_handler(error_handler)
 
-    # --- PENGATURAN JADWAL (JOB QUEUE) ---
+    # Maintenance Harian (00:00)
     if app.job_queue:
-        # Bersihkan cache otomatis setiap jam 00:00 malam
-        app.job_queue.run_daily(daily_clear_cache, time=time(hour=0, minute=0, second=0))
+        app.job_queue.run_daily(daily_maintenance, time=time(hour=0, minute=0, second=0))
 
-    # --- START BOT ---
-    print(">>> BOT SAMBUNG KATA MODULAR ONLINE (24/7 PM2 READY) <<<")
-    
-    # drop_pending_updates=True sangat penting agar saat bot restart,
-    # bot tidak banjir pesan lama yang menumpuk.
+    # Output terminal terakhir sebagai penanda bot jalan
+    print(">>> BOT RUNNING (VPS SILENT MODE) <<<")
     app.run_polling(drop_pending_updates=True)
 
 if __name__ == '__main__':

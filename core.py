@@ -26,8 +26,8 @@ def load_dictionary():
     
     if not os.path.exists(DICTIONARY_FILE):
         open(DICTIONARY_FILE, 'w').close()
-        print(f"⚠️ Kamus {DICTIONARY_FILE} tidak ditemukan, membuat file baru.")
-        return set()
+        logging.warning(f"<b>⚠️ Kamus</b>: File {DICTIONARY_FILE} tidak ditemukan, membuat file baru.")
+        return 0
 
     try:
         with open(DICTIONARY_FILE, "r", encoding="utf-8") as f:
@@ -38,11 +38,12 @@ def load_dictionary():
                     # Cache prefix untuk optimasi anti-mentok
                     if len(w) >= 2: valid_prefixes.add(w[:2])
                     if len(w) >= 3: valid_prefixes.add(w[:3])
-        print(f"✅ Kamus dimuat: {len(dictionary)} kata.")
-        return dictionary
+        
+        # Mengembalikan jumlah kata agar bisa digabung di pesan log utama
+        return len(dictionary)
     except Exception as e:
-        print(f"❌ Gagal memuat kamus: {e}")
-        return set()
+        logging.error(f"<b>❌ Gagal memuat kamus</b>: {e}")
+        return 0
 
 def get_level_info(tc):
     """Mengambil informasi level berdasarkan jumlah turn (tc)."""
@@ -80,5 +81,6 @@ def update_points(user_id, username, amount, tc_reached=0):
                 WHERE id = ?''', 
              (amount, un, tc_reached, user_id), commit=True)
 
-# Muat kamus saat module ini diimpor pertama kali
-load_dictionary()
+# --- PENTING ---
+# Baris load_dictionary() di bagian bawah ini dihapus agar bot tidak mengirim 
+# log double saat startup. Pemuatan akan dipicu langsung oleh kata.py atau game.py.
