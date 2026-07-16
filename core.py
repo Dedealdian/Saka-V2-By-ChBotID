@@ -13,20 +13,29 @@ rooms = {}
 # Dictionary untuk menyimpan kata baku
 dictionary = set()
 
-# Cache prefix untuk pengecekan ketersediaan kata secara instan
+# Cache prefix untuk pengecekan ketersediaan kata secara instan (Optimasi RAM)
 valid_prefixes = set()
 
 # --- HELPER PERMAINAN ---
 
 def load_dictionary():
-    """Memuat kata-kata dari file txt ke dalam memory."""
+    """
+    Memuat kata-kata dari file txt ke dalam memory.
+    Fungsi ini dibuat SENYAP (Silent) agar tidak menyebabkan spam log.
+    Mengembalikan jumlah kata yang berhasil dimuat.
+    """
     global dictionary, valid_prefixes
     dictionary.clear()
     valid_prefixes.clear()
     
+    # Cek keberadaan file kamus
     if not os.path.exists(DICTIONARY_FILE):
-        open(DICTIONARY_FILE, 'w').close()
-        logging.warning(f"<b>⚠️ Kamus</b>: File {DICTIONARY_FILE} tidak ditemukan, membuat file baru.")
+        try:
+            open(DICTIONARY_FILE, 'w').close()
+            # Log hanya dikirim jika terjadi anomali (file hilang)
+            logging.warning(f"<b>⚠️ Kamus</b>: File {DICTIONARY_FILE} dibuat baru karena tidak ditemukan.")
+        except:
+            pass
         return 0
 
     try:
@@ -35,14 +44,15 @@ def load_dictionary():
                 w = line.strip().lower()
                 if w:
                     dictionary.add(w)
-                    # Cache prefix untuk optimasi anti-mentok
+                    # Cache prefix untuk optimasi anti-mentok (2 & 3 huruf pertama)
                     if len(w) >= 2: valid_prefixes.add(w[:2])
                     if len(w) >= 3: valid_prefixes.add(w[:3])
         
-        # Mengembalikan jumlah kata agar bisa digabung di pesan log utama
+        # Mengembalikan angka saja. Pengiriman pesan log dilakukan oleh pemanggilnya.
         return len(dictionary)
     except Exception as e:
-        logging.error(f"<b>❌ Gagal memuat kamus</b>: {e}")
+        # Error fatal tetap dicatat namun diformat tebal
+        logging.error(f"<b>❌ Gagal Muat Kamus</b>: {str(e)}")
         return 0
 
 def get_level_info(tc):
@@ -57,23 +67,27 @@ def get_level_info(tc):
     else: return "WNI (Warga Negara Indonesia)", 10, "🏅"
 
 def is_owner(user_id):
-    """Cek apakah user adalah owner bot."""
+    """Cek apakah user adalah owner bot berdasarkan ID di config."""
     return user_id == OWNER_ID
 
 def generate_solo_id():
-    """Generate ID unik untuk mode Solo/Cross-chat (SK-XXXXX)."""
+    """Generate ID unik untuk mode Solo/Cross-chat (Format: SK-XXXXX)."""
     chars = string.ascii_uppercase + string.digits
     return "SK-" + "".join(random.choice(chars) for _ in range(5))
 
 def update_points(user_id, username, amount, tc_reached=0):
-    """Update poin user ke database PostgreSQL."""
+    """
+    Update poin dan statistik user ke database.
+    Menggunakan logika UPSERT (Insert or Update) yang stabil.
+    """
     un = username.replace("@", "") if username else "Player"
-    # Pastikan user ada di DB
+    
+    # 1. Pastikan user terdaftar di database
     db_query('''INSERT INTO users (id, username, points, max_tc, balance, spin_count) 
                 VALUES (?, ?, 0, 0, 0, 0) ON CONFLICT (id) DO NOTHING''', 
              (user_id, un), commit=True)
     
-    # Update poin dan max turn count (tc)
+    # 2. Update poin akumulatif dan rekor turn count tertinggi
     db_query('''UPDATE users SET 
                 points = GREATEST(0, points + ?), 
                 username = ?, 
@@ -81,6 +95,7 @@ def update_points(user_id, username, amount, tc_reached=0):
                 WHERE id = ?''', 
              (amount, un, tc_reached, user_id), commit=True)
 
-# --- PENTING ---
-# Baris load_dictionary() di bagian bawah ini dihapus agar bot tidak mengirim 
-# log double saat startup. Pemuatan akan dipicu langsung oleh kata.py atau game.py.
+# --- CATATAN PENTING ---
+# load_dictionary() sengaja tidak dipanggil di sini.
+# Pemuatan dilakukan di kata.py (startup) atau game.py (saat mulai game)
+# untuk menjaga urutan log agar sinkron dan tidak spam.
